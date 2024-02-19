@@ -35,7 +35,6 @@ func root(c echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
-// POSTされたときに読み込みが行われる
 func addItem(c echo.Context) error {
 	// itemファイルの指定
 	item_file := "../db/items.json"
@@ -89,6 +88,33 @@ func addItem(c echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
+func getItem(c echo.Context) error {
+	// itemファイルの指定
+	item_file := "../db/items.json"
+
+	// ファイルから読み込みを行う
+	// fileを開く
+	read_file, err := os.Open(item_file)
+	if err != nil {
+		c.Logger().Fatalf("JSONファイルを開けません %v",err)
+	}
+	defer read_file.Close()
+	// ファイルを読み込む
+	inputJsonData, err := os.ReadFile(item_file)
+	if err != nil {
+		c.Logger().Fatalf("JSONデータを読み込めません %v",err)
+	}
+	// // ファイルの内容を構造体に変換
+	// var items ItemList
+	// if err := json.Unmarshal(inputJsonData, &items); err != nil {
+	// 	c.Logger().Fatalf("JSONデータを変換できません %v",err)
+	// }
+	// fmt.Printf("%+v\n", items)
+
+	// response
+	return c.JSONBlob(http.StatusOK, inputJsonData)
+}
+
 func getImg(c echo.Context) error {
 	// Create image path
 	imgPath := path.Join(ImgDir, c.Param("imageFilename"))
@@ -103,6 +129,7 @@ func getImg(c echo.Context) error {
 	}
 	return c.File(imgPath)
 }
+
 
 func main() {
 	e := echo.New()
@@ -122,10 +149,9 @@ func main() {
 	}))
 
 	// Routes
-	// getをしたときにrootに飛ぶようになっている
 	e.GET("/", root)
+	e.GET("/items", getItem)
 	e.POST("/items", addItem)
-	// get
 	e.GET("/image/:imageFilename", getImg)
 
 
