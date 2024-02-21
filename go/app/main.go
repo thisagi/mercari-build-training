@@ -43,138 +43,140 @@ func root(c echo.Context) error {
 }
 
 // ファイルを開いてbyteデータで内容を読み込む
-func openFileAndInput(c echo.Context) ([]byte, error) {
+func openFileAndChengeStr(c echo.Context) (ItemList, error) {
 	read_file, err := os.Open(item_file)
-	if err != nil {
-		fmt.Printf("JSONファイルを開けません")
-		return nil, err
-	}
-	defer read_file.Close()
-
-	// ファイルを読み込む
-	inputJsonData, err := os.ReadFile(item_file)
-	if err != nil {
-		fmt.Printf("JSONデータを読み込めません")
-		return nil, err
-	}
-
-	return inputJsonData, err
-}
-
-func chengeStr(inputJsonData []byte) (ItemList, error){
-	// ファイルの内容を構造体に変換
 	var items ItemList
-	if err := json.Unmarshal(inputJsonData, &items); err != nil {
-		fmt.Printf("構造体に変換できません")
+	// fileを開く
+	if err != nil {
+		c.Logger().Infof("Cannot open the file")
 		return items, err
 	}
-	fmt.Printf("読み込んだファイル内容 \n %+v\n", items)
+	defer read_file.Close()
+	// fileを読み込む
+	inputJsonData, err := os.ReadFile(item_file)
+	if err != nil {
+		c.Logger().Infof("Cannot read the file data")
+		return items, err
+	}
+	// 読み込んだinputJsonDataの内容を構造体に変換
+	if err := json.Unmarshal(inputJsonData, &items); err != nil {
+		c.Logger().Infof("Cannot convert to a struct")
+		return items, err
+	}
+	//fmt.Printf("読み込んだファイル内容 \n %+v\n", items)
 	return items, nil
 }
 
 // ファイルに書き込みを行う
 func writeFile(items ItemList) error {
+	// 書き込みファイルを作る
 	file, err := os.Create(item_file)
 	if err != nil {
-		fmt.Printf("JSONファイルを開けません")
+		fmt.Printf("Cannot open the file\n")
 	}
 	defer file.Close()
+	// ファイルに書き込む
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(items); err != nil {
-		fmt.Printf("書き込みができません")
+		fmt.Printf("Cannot write the file data\n")
 	}
 	return err
 }
 
 // imageのハッシュ生成
 func imageHash(img_file *multipart.FileHeader) (string, error) {
-	// file open
+	// 画像ファイルを開く
 	img, err := img_file.Open()
 	if err != nil {
-		fmt.Printf("イメージオープンエラー")
+		fmt.Printf("Cannot open the image\n")
 	}
 	defer img.Close()
 
-	// hash計算
+	// hash値計算
 	hash := sha256.New()
 	if _, err := io.Copy(hash, img); err != nil {
-		fmt.Printf("ハッシュエラー")
+		fmt.Printf("Hash error\n")
 	}
-
 	img_name := hex.EncodeToString(hash.Sum(nil)) + ".jpg"
-
 	file_path := ImgDir + "/"+ img_name
 	
+	// 内容を保存
 	file, err := os.Create(file_path)
 	if err != nil {
-		fmt.Printf("オープンエラー")
+		fmt.Printf("Cannot open the file\n")
 	}
 	defer file.Close()
-
 	if _, err = io.Copy(file, img); err != nil {
-		fmt.Printf("書き込みエラー")
+		fmt.Printf("Cannot copy the image\n")
 	}
 
 	return img_name, err
 }
 
+// アイテムの追加
 func addItem(c echo.Context) error {
 	// Get form data name and category
 	name := c.FormValue("name")
 	category := c.FormValue("category")
 	
-	// 画像に関する取得
+	// 画像をハッシュ化
 	img_file, err := c.FormFile("image")
     if err != nil {
-        c.Logger().Fatalf("画像取得エラー: %v", err)
-    }	
-	
+        c.Logger().Fatalf("Image retrieval error: %v", err)
+    }
 	img_name, err := imageHash(img_file)
 	if err != nil {
-        c.Logger().Fatalf("ハッシュ変換エラー: %v", err)
+        c.Logger().Fatalf("Hash conversion error: %v", err)
     }	
-
-	fmt.Printf("Receive item: %s \ncategory: %s \nimg_name: %s \n", name, category, img_name)
+	c.Logger().Infof("Receive item: %s \ncategory: %s \nimg_name: %s \n", name, category, img_name)
 	
-	// 受け取った名前とカテゴリーをItem構造体へ変換
+	// 受け取ったデータをItem構造体へ変換
 	new_item := Item{ name, category, img_name}
-	
-	// ファイル内容を読み込み
-	inputJsonData, err := openFileAndInput(c)
-	if err != nil { c.Logger().Fatalf("ファイル読み込みに失敗しました %v",err) }
 
-	// ファイルを構造体に変換
-	items, err := chengeStr(inputJsonData)
-	if err != nil { c.Logger().Fatalf("JSONデータを変換できません %v",err) }
+	// jsonファイルを内容を読み出す
+	items, err := openFileAndChengeStr(c)
+	if err != nil { c.Logger().Fatalf("Cannot read the file %v",err) }
 
 	// 読み込んだ内容に今回の内容を追加する
 	items.Items = append(items.Items, new_item)
-	fmt.Printf("%+v\n", items)
 
-	// 書き込み
+	// jsonファイルを内容を読み出す
 	err = writeFile(items)
-	if err != nil { c.Logger().Fatalf("ファイルへの書き込みに失敗しました %v",err) }
+	if err != nil { c.Logger().Fatalf("Cannot write the file %v",err) }
 
-	// response
 	message := fmt.Sprintf("item received: %s", name)
 	res := Response{Message: message}
 	return c.JSON(http.StatusOK, res)
 }
 
+// 保存されているアイテムの表示
 func getItem(c echo.Context) error {
-	inputJsonData, err := openFileAndInput(c)
-	if err != nil { c.Logger().Fatalf("ファイル読み込みに失敗しました %v",err) }
-
-	items, err := chengeStr(inputJsonData)
-	if err != nil { c.Logger().Fatalf("ファイルの変換に失敗しました %v",err) }
-
+	// ファイルから読み込み
+	items, err := openFileAndChengeStr(c)
+	if err != nil { c.Logger().Fatalf("Cannot read the file %v",err) }
 	bytes, err := json.Marshal(items)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("内容を出力")
-	fmt.Println(string(bytes))
-	return c.JSONBlob(http.StatusOK, inputJsonData)
+
+	return c.JSONBlob(http.StatusOK, bytes)
+}
+
+// idによるアイテムの表示
+func getIdItem(c echo.Context) error {
+	id, _ := strconv.Atoi(c.Param("id"))
+	
+	// ファイル読み込み
+	items, err := openFileAndChengeStr(c)
+	if err != nil { c.Logger().Fatalf("Cannot read the file %v",err) }
+
+	// 存在するidならitem情報を返す
+	if id < 1 || len(items.Items) < id {
+		res := "ID does not exist"
+		return c.JSON(http.StatusBadRequest, res)
+	} else {
+		return c.JSON(http.StatusOK, items.Items[id-1])
+	}
 }
 
 func getImg(c echo.Context) error {
@@ -186,23 +188,11 @@ func getImg(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, res)
 	}
 	if _, err := os.Stat(imgPath); err != nil {
+		//c.Logger().Infof("Image not found: %s", imgPath)
 		c.Logger().Debugf("Image not found: %s", imgPath)
 		imgPath = path.Join(ImgDir, "default.jpg")
 	}
 	return c.File(imgPath)
-}
-
-func getIdItem(c echo.Context) error {
-	id, _ := strconv.Atoi(c.Param("id"))
-	// ファイル内容を読み込み
-	inputJsonData, err := openFileAndInput(c)
-	if err != nil { c.Logger().Fatalf("ファイル読み込みに失敗しました %v",err) }
-
-	// ファイルを構造体に変換
-	items, err := chengeStr(inputJsonData)
-	if err != nil { c.Logger().Fatalf("JSONデータを変換できません %v",err) }
-
-	return c.JSON(http.StatusOK, items.Items[id-1])
 }
 
 func main() {
@@ -211,7 +201,8 @@ func main() {
 	// Middleware
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Logger.SetLevel(log.INFO)
+	//e.Logger.SetLevel(log.INFO)
+	e.Logger.SetLevel(log.DEBUG)
 
 	front_url := os.Getenv("FRONT_URL")
 	if front_url == "" {
