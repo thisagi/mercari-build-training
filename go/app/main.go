@@ -6,21 +6,23 @@ import (
 	"os"
 	"path"
 	"strings"
-	"encoding/json"
 	"crypto/sha256"
 	"io"
 	"mime/multipart"
 	"encoding/hex"
 	"strconv"
+	"database/sql"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
 	ImgDir = "images"
-	item_file = "../db/items.json"
+	db_file = "../db/mercari.sqlite3"
 )
 
 type Item struct {
@@ -42,45 +44,34 @@ func root(c echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
-// ファイルを開いてbyteデータで内容を読み込む
+// dbの内容を読み込む
 func openFileAndChengeStr(c echo.Context) (ItemList, error) {
-	read_file, err := os.Open(item_file)
-	var items ItemList
-	// fileを開く
+	read_file, err := sql.Open("sqlite3",db_file)
+	// dbを開く
 	if err != nil {
-		c.Logger().Infof("Cannot open the file")
-		return items, err
+		c.Logger().Fatalf("Cannot open the db")
 	}
 	defer read_file.Close()
-	// fileを読み込む
-	inputJsonData, err := os.ReadFile(item_file)
-	if err != nil {
-		c.Logger().Infof("Cannot read the file data")
-		return items, err
-	}
-	// 読み込んだinputJsonDataの内容を構造体に変換
-	if err := json.Unmarshal(inputJsonData, &items); err != nil {
-		c.Logger().Infof("Cannot convert to a struct")
-		return items, err
-	}
-	//fmt.Printf("読み込んだファイル内容 \n %+v\n", items)
-	return items, nil
-}
 
-// ファイルに書き込みを行う
-func writeFile(items ItemList) error {
-	// 書き込みファイルを作る
-	file, err := os.Create(item_file)
+	// dbを読み込む
+	row_data, err := read_file.Query("SELECT name, category, image_name FROM items")
 	if err != nil {
-		fmt.Printf("Cannot open the file\n")
+		c.Logger().Fatalf("Cannot read the db data")
 	}
-	defer file.Close()
-	// ファイルに書き込む
-	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(items); err != nil {
-		fmt.Printf("Cannot write the file data\n")
+	defer row_data.Close()
+
+	// 読み込んだ内容を構造体に変換
+	var items ItemList
+	for row_data.Next(){
+		var it Item
+		err := row_data.Scan(&it.Name, &it.Category, &it.ImageName)
+		if err != nil {
+			c.Logger().Fatalf("Cannot read the db data")
+		}
+		items.Items = append(items.Items, it)
 	}
-	return err
+
+	return items, nil
 }
 
 // imageのハッシュ生成
@@ -127,22 +118,24 @@ func addItem(c echo.Context) error {
 	img_name, err := imageHash(img_file)
 	if err != nil {
         c.Logger().Fatalf("Hash conversion error: %v", err)
-    }	
-	c.Logger().Infof("Receive item: %s \ncategory: %s \nimg_name: %s \n", name, category, img_name)
-	
-	// 受け取ったデータをItem構造体へ変換
-	new_item := Item{ name, category, img_name}
+    }
 
-	// jsonファイルを内容を読み出す
-	items, err := openFileAndChengeStr(c)
-	if err != nil { c.Logger().Fatalf("Cannot read the file %v",err) }
+	c.Logger().Infof("Receive item: %s category: %s img_name: %s", name, category, img_name)
 
-	// 読み込んだ内容に今回の内容を追加する
-	items.Items = append(items.Items, new_item)
+	// dbに書き込む
+	// dbを開く
+	read_file, err := sql.Open("sqlite3",db_file)
+	if err != nil {
+		c.Logger().Fatalf("Cannot open the db")
+	}
+	defer read_file.Close()
 
-	// jsonファイルを内容を読み出す
-	err = writeFile(items)
-	if err != nil { c.Logger().Fatalf("Cannot write the file %v",err) }
+	// dbに追加
+	_, err = read_file.Exec("INSERT INTO items (name, category, image_name) VALUES (?, ?, ?)", 
+													name, category, img_name)
+	if err != nil {
+		c.Logger().Fatalf("Cannot Insert the db")
+	}
 
 	message := fmt.Sprintf("item received: %s", name)
 	res := Response{Message: message}
@@ -153,13 +146,11 @@ func addItem(c echo.Context) error {
 func getItem(c echo.Context) error {
 	// ファイルから読み込み
 	items, err := openFileAndChengeStr(c)
-	if err != nil { c.Logger().Fatalf("Cannot read the file %v",err) }
-	bytes, err := json.Marshal(items)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	return c.JSONBlob(http.StatusOK, bytes)
+	return c.JSON(http.StatusOK, items)
 }
 
 // idによるアイテムの表示
@@ -177,6 +168,39 @@ func getIdItem(c echo.Context) error {
 	} else {
 		return c.JSON(http.StatusOK, items.Items[id-1])
 	}
+}
+
+func searchItem(c echo.Context) error {
+	// 
+	keyword := c.QueryParam("keyword")
+
+	read_file, err := sql.Open("sqlite3",db_file)
+	// dbを開く
+	if err != nil {
+		c.Logger().Fatalf("Cannot open the db")
+	}
+	defer read_file.Close()
+
+	// dbを読み込む
+	row_data, err := read_file.Query("SELECT name, category, image_name FROM items WHERE name LIKE ?",
+																					"%"+keyword+"%")
+	if err != nil {
+		c.Logger().Fatalf("Cannot read the search data")
+	}
+	defer row_data.Close()
+
+	// 読み込んだ内容を構造体に変換
+	var items ItemList
+	for row_data.Next(){
+		var it Item
+		err := row_data.Scan(&it.Name, &it.Category, &it.ImageName)
+		if err != nil {
+			c.Logger().Fatalf("Cannot read the db data")
+		}
+		items.Items = append(items.Items, it)
+	}
+
+	return c.JSON(http.StatusOK, items)
 }
 
 func getImg(c echo.Context) error {
@@ -218,6 +242,7 @@ func main() {
 	e.GET("/items/:id", getIdItem)
 	e.POST("/items", addItem)
 	e.GET("/image/:imageFilename", getImg)
+	e.GET("/search", searchItem)
 
 
 	// Start server
