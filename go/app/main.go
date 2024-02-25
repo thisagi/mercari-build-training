@@ -26,6 +26,7 @@ const (
 )
 
 type Item struct {
+	Id         int  `json:"id"`
 	Name       string  `json:"name"`
 	Category   string  `json:"category"`
 	ImageName  string  `json:"image_name"`
@@ -44,34 +45,27 @@ func root(c echo.Context) error {
 	return c.JSON(http.StatusOK, res)
 }
 
-// dbの内容を読み込む
-func openFileAndChengeStr(c echo.Context) (ItemList, error) {
+// dbを開く
+func opneSql(c echo.Context) (*sql.DB,  error){
 	read_file, err := sql.Open("sqlite3",db_file)
-	// dbを開く
 	if err != nil {
 		c.Logger().Fatalf("Cannot open the db")
 	}
-	defer read_file.Close()
+	return read_file, err
+}
 
-	// dbを読み込む
-	row_data, err := read_file.Query("SELECT name, category, image_name FROM items")
-	if err != nil {
-		c.Logger().Fatalf("Cannot read the db data")
-	}
-	defer row_data.Close()
-
-	// 読み込んだ内容を構造体に変換
+// sql.RowsをItemListに変換
+func changeItemList(row_data *sql.Rows, c echo.Context) (ItemList) {
 	var items ItemList
 	for row_data.Next(){
 		var it Item
-		err := row_data.Scan(&it.Name, &it.Category, &it.ImageName)
+		err := row_data.Scan(&it.Id, &it.Name, &it.Category, &it.ImageName)
 		if err != nil {
 			c.Logger().Fatalf("Cannot read the db data")
 		}
 		items.Items = append(items.Items, it)
 	}
-
-	return items, nil
+	return items
 }
 
 // imageのハッシュ生成
@@ -122,17 +116,31 @@ func addItem(c echo.Context) error {
 
 	c.Logger().Infof("Receive item: %s category: %s img_name: %s", name, category, img_name)
 
-	// dbに書き込む
 	// dbを開く
-	read_file, err := sql.Open("sqlite3",db_file)
-	if err != nil {
-		c.Logger().Fatalf("Cannot open the db")
-	}
+	read_file, err := opneSql(c)
 	defer read_file.Close()
 
 	// dbに追加
-	_, err = read_file.Exec("INSERT INTO items (name, category, image_name) VALUES (?, ?, ?)", 
-													name, category, img_name)
+	var category_id int
+	// categories tableのnameの中から追加するカテゴリーと一致するidを取り出す
+	err = read_file.QueryRow("SELECT id FROM category WHERE name = ?", category).Scan(&category_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// category tableにない場合は追加する
+			_, err = read_file.Exec("INSERT INTO category (name) VALUES (?)", category)
+			if err != nil {
+				c.Logger().Fatalf("cannot insert %v",err)
+			}
+			err = read_file.QueryRow("SELECT id FROM category WHERE name = ?", category).Scan(&category_id)
+			if err != nil {
+				c.Logger().Fatalf("scan error %v",err)
+			}
+		} else {
+			c.Logger().Fatalf("query error %v",err)
+		}
+	}
+	// 内容を追加
+	_, err = read_file.Exec("INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)", name, category_id, img_name)
 	if err != nil {
 		c.Logger().Fatalf("Cannot Insert the db")
 	}
@@ -144,11 +152,19 @@ func addItem(c echo.Context) error {
 
 // 保存されているアイテムの表示
 func getItem(c echo.Context) error {
-	// ファイルから読み込み
-	items, err := openFileAndChengeStr(c)
+	// dbを開く
+	read_file, err := opneSql(c)
+	defer read_file.Close()
+
+	// dbを読み込む
+	row_data, err := read_file.Query("SELECT items.id, items.name, category.name, items.image_name FROM items INNER JOIN category ON items.category_id = category.id")
 	if err != nil {
-		log.Fatal(err)
+		c.Logger().Fatalf("Cannot read the db data")
 	}
+	defer row_data.Close()
+
+	// 読み込んだ内容を構造体に変換
+	items := changeItemList(row_data, c)
 
 	return c.JSON(http.StatusOK, items)
 }
@@ -157,49 +173,41 @@ func getItem(c echo.Context) error {
 func getIdItem(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 	
-	// ファイル読み込み
-	items, err := openFileAndChengeStr(c)
-	if err != nil { c.Logger().Fatalf("Cannot read the file %v",err) }
-
-	// 存在するidならitem情報を返す
-	if id < 1 || len(items.Items) < id {
-		res := "ID does not exist"
-		return c.JSON(http.StatusBadRequest, res)
-	} else {
-		return c.JSON(http.StatusOK, items.Items[id-1])
-	}
-}
-
-func searchItem(c echo.Context) error {
-	// 
-	keyword := c.QueryParam("keyword")
-
-	read_file, err := sql.Open("sqlite3",db_file)
 	// dbを開く
-	if err != nil {
-		c.Logger().Fatalf("Cannot open the db")
-	}
+	read_file, err := opneSql(c)
 	defer read_file.Close()
 
 	// dbを読み込む
-	row_data, err := read_file.Query("SELECT name, category, image_name FROM items WHERE name LIKE ?",
-																					"%"+keyword+"%")
+	row_data, err := read_file.Query("SELECT items.id, items.name, category.name, items.image_name FROM items INNER JOIN category ON items.category_id = category.id WHERE items.id = ?",id)
+	if err != nil {
+		c.Logger().Fatalf("Cannot read the db data")
+	}
+	defer row_data.Close()
+
+	// 読み込んだ内容を構造体に変換
+	items := changeItemList(row_data, c)
+
+	return c.JSON(http.StatusOK, items)
+}
+
+// keywordと一致する商品を探す
+func searchItem(c echo.Context) error {
+	keyword := c.QueryParam("keyword")
+
+	// dbを開く
+	read_file, err := opneSql(c)
+	defer read_file.Close()
+
+	// dbを読み込む
+	row_data, err := read_file.Query("SELECT items.id, items.name, category.name, items.image_name FROM items INNER JOIN category ON items.category_id = category.id WHERE items.name LIKE ?","%"+keyword+"%")
 	if err != nil {
 		c.Logger().Fatalf("Cannot read the search data")
 	}
 	defer row_data.Close()
 
 	// 読み込んだ内容を構造体に変換
-	var items ItemList
-	for row_data.Next(){
-		var it Item
-		err := row_data.Scan(&it.Name, &it.Category, &it.ImageName)
-		if err != nil {
-			c.Logger().Fatalf("Cannot read the db data")
-		}
-		items.Items = append(items.Items, it)
-	}
-
+	items := changeItemList(row_data, c)
+	
 	return c.JSON(http.StatusOK, items)
 }
 
@@ -243,7 +251,6 @@ func main() {
 	e.POST("/items", addItem)
 	e.GET("/image/:imageFilename", getImg)
 	e.GET("/search", searchItem)
-
 
 	// Start server
 	e.Logger.Fatal(e.Start(":9000"))
