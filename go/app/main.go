@@ -71,30 +71,35 @@ func changeItemList(row_data *sql.Rows, c echo.Context) (ItemList) {
 }
 
 // imageのハッシュ生成
-func imageHash(img_file *multipart.FileHeader) (string, error) {
+func imageHash(img_file *multipart.FileHeader, c echo.Context) (string, error) {
 	// 画像ファイルを開く
 	img, err := img_file.Open()
-	if err != nil {
-		fmt.Printf("Cannot open the image\n")
-	}
+	var image_name string
 	defer img.Close()
+	if err != nil {
+		c.Logger().Error("Cannot open the image\n")
+		return img_name, err
+	}
 
 	// hash値計算
 	hash := sha256.New()
 	if _, err := io.Copy(hash, img); err != nil {
-		fmt.Printf("Hash error\n")
+		c.Logger().Error("Hash error\n")
+		return img_name, err
 	}
-	img_name := hex.EncodeToString(hash.Sum(nil)) + ".jpg"
+	img_name = hex.EncodeToString(hash.Sum(nil)) + ".jpg"
 	file_path := ImgDir + "/"+ img_name
 	
 	// 内容を保存
 	file, err := os.Create(file_path)
-	if err != nil {
-		fmt.Printf("Cannot open the file\n")
-	}
 	defer file.Close()
+	if err != nil {
+		c.Logger().Error("Cannot open the file\n")
+		return img_name, err
+	}
 	if _, err = io.Copy(file, img); err != nil {
-		fmt.Printf("Cannot copy the image\n")
+		c.Logger().Error("Cannot copy the image\n")
+		return img_name, err
 	}
 
 	return img_name, err
@@ -111,7 +116,7 @@ func addItem(c echo.Context) error {
     if err != nil {
         c.Logger().Fatalf("Image retrieval error: %v", err)
     }
-	img_name, err := imageHash(img_file)
+	img_name, err := imageHash(img_file, cannot)
 	if err != nil {
         c.Logger().Fatalf("Hash conversion error: %v", err)
     }
