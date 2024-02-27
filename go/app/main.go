@@ -22,8 +22,10 @@ import (
 
 const (
 	ImgDir = "images"
-	db_file = "../db/mercari.sqlite3"
+	db_file = "/db/mercari.sqlite3"
 )
+
+// var db_file := os.Getenv("DB_PATH")
 
 type Item struct {
 	Id         int  `json:"id"`
