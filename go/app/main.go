@@ -176,8 +176,12 @@ func getItem(c echo.Context) error {
 
 // idによるアイテムの表示
 func getIdItem(c echo.Context) error {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("id"))
 	
+	if err != nil {
+		c.Logger().Fatalf("id conversion error")
+	}
+
 	// dbを開く
 	read_file, err := opneSql(c)
 	defer read_file.Close()
