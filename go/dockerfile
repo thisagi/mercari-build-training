@@ -10,11 +10,8 @@ WORKDIR /app
 
 COPY . /app/
 
-ENV DB_PATH=/db
-
 RUN mv db /db 
-RUN chown -R trainee:mercari /db
+RUN chown -R trainee:mercari /app
 
-WORKDIR /app/go
 RUN go mod tidy
 CMD go run app/main.go

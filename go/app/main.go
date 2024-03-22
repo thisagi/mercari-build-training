@@ -74,7 +74,8 @@ func changeItemList(row_data *sql.Rows, c echo.Context) (ItemList) {
 func imageHash(img_file *multipart.FileHeader, c echo.Context) (string, error) {
 	// 画像ファイルを開く
 	img, err := img_file.Open()
-	var image_name string
+	var img_name string
+
 	defer img.Close()
 	if err != nil {
 		c.Logger().Error("Cannot open the image\n")
@@ -116,7 +117,9 @@ func addItem(c echo.Context) error {
     if err != nil {
         c.Logger().Fatalf("Image retrieval error: %v", err)
     }
-	img_name, err := imageHash(img_file, cannot)
+
+	img_name, err := imageHash(img_file, c)
+
 	if err != nil {
         c.Logger().Fatalf("Hash conversion error: %v", err)
     }
@@ -178,8 +181,12 @@ func getItem(c echo.Context) error {
 
 // idによるアイテムの表示
 func getIdItem(c echo.Context) error {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("id"))
 	
+	if err != nil {
+		c.Logger().Fatalf("id conversion error")
+	}
+
 	// dbを開く
 	read_file, err := opneSql(c)
 	defer read_file.Close()
