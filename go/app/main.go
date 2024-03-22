@@ -22,8 +22,10 @@ import (
 
 const (
 	ImgDir = "images"
-	db_file = "../db/mercari.sqlite3"
+	db_file = "/db/mercari.sqlite3"
 )
+
+// var db_file := os.Getenv("DB_PATH")
 
 type Item struct {
 	Id         int  `json:"id"`
@@ -73,6 +75,7 @@ func imageHash(img_file *multipart.FileHeader, c echo.Context) (string, error) {
 	// 画像ファイルを開く
 	img, err := img_file.Open()
 	var img_name string
+
 	defer img.Close()
 	if err != nil {
 		c.Logger().Error("Cannot open the image\n")
@@ -114,7 +117,9 @@ func addItem(c echo.Context) error {
     if err != nil {
         c.Logger().Fatalf("Image retrieval error: %v", err)
     }
+
 	img_name, err := imageHash(img_file, c)
+
 	if err != nil {
         c.Logger().Fatalf("Hash conversion error: %v", err)
     }
